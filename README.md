@@ -2,7 +2,7 @@
 
 An end-to-end pipeline that converts clinical consultation audio recordings into structured medical forms using locally-hosted speech-to-text and large language models. Zero data leaves the machine.
 
-**Pipeline:** Audio → STT (Whisper / Qwen-ASR) → Transcript → LLM (Phi-4 / Llama / Qwen) → Populated JSON Form
+**Pipeline:** Audio → STT (Whisper / Qwen-ASR) → Transcript → LLM (Phi-4 / Llama / Qwen / MedGemma) → Populated JSON Form
 
 ---
 
@@ -20,7 +20,8 @@ An end-to-end pipeline that converts clinical consultation audio recordings into
 10. [Live Demo](#live-demo)
 11. [Benchmark Results](#benchmark-results)
 12. [Configuration Reference](#configuration-reference)
-13. [Troubleshooting](#troubleshooting)
+13. [MedGemma Installation](#medgemma-installation)
+14. [Troubleshooting](#troubleshooting)
 
 ---
 
@@ -97,6 +98,8 @@ This script:
 5. Installs all Python packages (faster-whisper, qwen-asr, jiwer, gradio, etc.)
 6. Installs Ollama and pulls LLM models (Phi-4 14B, Qwen 2.5 7B, Llama 3.2 3B)
 
+> **Note:** MedGemma 1.5 4B requires a separate installation from a GGUF file (not available via `ollama pull`). See the [MedGemma Installation](#medgemma-installation) section after running setup.
+
 ### Manual Setup (if setup.sh doesn't work)
 
 ```bash
@@ -121,6 +124,22 @@ ollama serve &
 ollama pull phi4:14b
 ollama pull qwen2.5:7b
 ollama pull llama3.2:3b
+
+# MedGemma 1.5 4B (medical-specialist LLM — see MedGemma section below)
+pip install huggingface-hub
+huggingface-cli download unsloth/medgemma-1.5-4b-it-GGUF medgemma-1.5-4b-it-Q4_K_M.gguf --local-dir ./models
+cat > models/Modelfile << 'EOF'
+FROM ./medgemma-1.5-4b-it-Q4_K_M.gguf
+PARAMETER temperature 0.1
+PARAMETER num_predict 8192
+TEMPLATE """<start_of_turn>user
+{{ .System }}
+
+{{ .Prompt }}<end_of_turn>
+<start_of_turn>model
+"""
+EOF
+ollama create medgemma:4b -f models/Modelfile
 ```
 
 ### Verify GPU Works
@@ -312,13 +331,16 @@ Each transcript is saved as JSON with full text, word-level timestamps (Whisper)
 
 ### LLM Extraction (03_extract.py)
 
-Three LLMs are benchmarked via Ollama:
+Four LLMs are benchmarked via Ollama:
 
-| Model | Ollama ID | Params | VRAM Usage |
-|---|---|---|---|
-| Llama 3.2 | `llama3.2:3b` | 3B | ~2 GB |
-| Qwen 2.5 | `qwen2.5:7b` | 7B | ~5 GB |
-| Phi-4 | `phi4:14b` | 14B | ~9 GB |
+| Model | Ollama ID | Params | VRAM Usage | Notes |
+|---|---|---|---|---|
+| Llama 3.2 | `llama3.2:3b` | 3B | ~2 GB | Lightweight baseline |
+| Qwen 2.5 | `qwen2.5:7b` | 7B | ~5 GB | Prompt-sensitive |
+| Phi-4 | `phi4:14b` | 14B | ~9 GB | Best accuracy |
+| MedGemma 1.5 | `medgemma:4b` | 4B | ~3 GB | Medical-specialist (Google Health AI) |
+
+**MedGemma 1.5 4B** is a medical-domain LLM from Google's Health AI Developer Foundations. It is specifically trained on EHR data extraction (90% on EHRQA) and medical document understanding (78% F1 on lab reports). At 4B params it requires less VRAM than Phi-4 while being medically specialised. See the [MedGemma installation section](#medgemma-installation) below for setup instructions.
 
 The extraction prompt includes:
 - A system prompt with 11 critical rules (field name matching, date formatting, medication specificity, etc.)
@@ -446,6 +468,9 @@ Whisper produces ~2× more words than Qwen-ASR, leading to higher downstream ext
 | Phi-4 14B | 17/18 | **66.6%** | **63.8%** |
 | Llama 3.2 3B | 13/18 | 40.9% | 36.3% |
 | Qwen 2.5 7B | 17/18 | 15.3% | 12.4% |
+| MedGemma 1.5 4B | tested | underperformed | — |
+
+MedGemma was tested but did not outperform Phi-4 on this specific extraction task, likely because MedGemma's medical training focuses on radiology reports and lab data rather than cannabis clinic consultation forms. It remains a strong candidate for other medical extraction tasks and is included in the pipeline for benchmarking.
 
 ### Best Pipeline
 
@@ -499,6 +524,86 @@ Then add to `LLM_MODELS` in `config.py`:
     "description": "Description for logs",
 },
 ```
+
+---
+
+## MedGemma Installation
+
+[MedGemma 1.5 4B](https://huggingface.co/google/medgemma-1.5-4b-it) is a medical-domain LLM from Google's Health AI Developer Foundations program, built on the Gemma 3 architecture and fine-tuned on medical text, EHR data, and clinical documents. It is free for both research and commercial use.
+
+Key capabilities relevant to this project:
+- **EHR understanding**: 90% accuracy on the EHRQA electronic health record QA dataset
+- **Medical document understanding**: 78% F1 on lab report data extraction
+- **Smaller than Phi-4**: 4B params (~3 GB VRAM) vs 14B params (~9 GB VRAM)
+
+MedGemma is not available directly via `ollama pull`. It must be installed from a GGUF file:
+
+### Step 1: Accept the License
+
+Go to [huggingface.co/google/medgemma-1.5-4b-it](https://huggingface.co/google/medgemma-1.5-4b-it), log in, and agree to the Health AI Developer Foundations terms of use.
+
+### Step 2: Download the GGUF
+
+```bash
+cd ~/project-dir
+pip install huggingface-hub
+mkdir -p models
+
+# Download the Q4_K_M quantisation (~2.5 GB)
+huggingface-cli download unsloth/medgemma-1.5-4b-it-GGUF \
+    medgemma-1.5-4b-it-Q4_K_M.gguf \
+    --local-dir ./models
+```
+
+### Step 3: Create the Ollama Model
+
+```bash
+cat > models/Modelfile << 'EOF'
+FROM ./medgemma-1.5-4b-it-Q4_K_M.gguf
+PARAMETER temperature 0.1
+PARAMETER num_predict 8192
+TEMPLATE """<start_of_turn>user
+{{ .System }}
+
+{{ .Prompt }}<end_of_turn>
+<start_of_turn>model
+"""
+EOF
+
+ollama create medgemma:4b -f models/Modelfile
+```
+
+### Step 4: Verify
+
+```bash
+ollama run medgemma:4b "Extract the patient ID from this text: Patient ID AG-042, male, age 55."
+```
+
+### Step 5: Add to config.py
+
+MedGemma should already be in `LLM_MODELS` in `config.py`:
+
+```python
+{
+    "name": "medgemma-4b",
+    "ollama_id": "medgemma:4b",
+    "params": "4B",
+    "description": "MedGemma 1.5 4B — medical-specialist, trained on EHR extraction",
+},
+```
+
+Then re-run extraction and evaluation:
+
+```bash
+python 03_extract.py
+python 04_evaluate.py
+```
+
+### Notes
+
+- The `unsloth/medgemma-1.5-4b-it-GGUF` repo provides multiple quantisation levels. Q4_K_M is a good balance of speed and quality. Q8_0 is higher quality but uses ~5 GB VRAM.
+- MedGemma is sensitive to prompt formatting. The Gemma 3 chat template uses `<start_of_turn>` / `<end_of_turn>` tokens, which are handled by the Modelfile above.
+- MedGemma has not been optimised for multi-turn conversations. Each extraction is a single-turn request, which is the intended use pattern.
 
 ---
 
