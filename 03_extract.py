@@ -55,18 +55,18 @@ def main():
 
     # Determine which STT model to use for extraction input
     # Use the best model from transcription benchmarks if available
-    # bench_path = os.path.join(TRANSCRIPTS_DIR, "model_benchmark_stats.json")
-    # if os.path.exists(bench_path):
-    #     with open(bench_path) as f:
-    #         bench = json.load(f)
-    #     # Pick the model with most words (proxy for accuracy)
-    #     best_stt = max(bench, key=lambda m: bench[m].get("total_words", 0))
-    #     print(f"   Using transcripts from: {best_stt}")
-    # else:
-    #     best_stt = None
-    #     print("   Using first available transcript per entry")
-    best_stt = "whisper-large-v3-turbo"
-    print(f"   Using STT model: {best_stt}")
+    bench_path = os.path.join(TRANSCRIPTS_DIR, "model_benchmark_stats.json")
+    if os.path.exists(bench_path):
+        with open(bench_path) as f:
+            bench = json.load(f)
+        # Pick the model with most words (proxy for accuracy)
+        best_stt = max(bench, key=lambda m: bench[m].get("total_words", 0))
+        print(f"   Using transcripts from: {best_stt}")
+    else:
+        best_stt = None
+        print("   Using first available transcript per entry")
+    # best_stt = "whisper-large-v3-turbo"
+    # print(f"   Using STT model: {best_stt}")
 
     # ── Run each LLM ──
     all_extractions = {}
