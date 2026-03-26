@@ -1,2 +1,6 @@
-# ai_hub_hackathon
-An end-to-end pipeline that converts clinical consultation audio recordings into structured medical forms using locally-hosted speech-to-text and large language models. Zero data leaves the machine.
+---
+title: group_seven
+app_file: 05_demo.py
+sdk: gradio
+sdk_version: 6.10.0
+---
